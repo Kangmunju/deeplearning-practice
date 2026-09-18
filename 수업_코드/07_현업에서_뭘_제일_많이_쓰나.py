@@ -36,16 +36,20 @@ import warnings
 import numpy as np
 import pandas as pd
 
-warnings.filterwarnings("ignore")          # 수업 화면을 깨끗하게. 실무에선 경고를 읽으세요
-DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용데이터")
+warnings.filterwarnings("ignore")  # 수업 화면을 깨끗하게. 실무에선 경고를 읽으세요
+DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용_데이터")
 
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor, export_text
-from sklearn.ensemble import (RandomForestClassifier, RandomForestRegressor,
-                              HistGradientBoostingClassifier, HistGradientBoostingRegressor)
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    RandomForestRegressor,
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+)
 from sklearn.metrics import recall_score, precision_score, f1_score
 
 df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8-sig")
@@ -110,9 +114,13 @@ print(export_text(트리, feature_names=특징이름))
 # ★ 트리의 두 번째 장점: 표준화가 필요 없다 ★
 # 트리는 "값이 얼마보다 큰가" 만 보지, 값의 크기를 더하거나 곱하지 않습니다.
 # 그래서 회전수 1500 과 토크 40 이 섞여 있어도 아무 문제가 없어요. 직접 확인합니다.
-Xc_tr, Xc_te, yc_tr, yc_te = train_test_split(X, y_고장, test_size=0.3, random_state=3, stratify=y_고장)
+Xc_tr, Xc_te, yc_tr, yc_te = train_test_split(
+    X, y_고장, test_size=0.3, random_state=3, stratify=y_고장
+)
 숲_생 = RandomForestClassifier(n_estimators=200, random_state=0).fit(Xc_tr, yc_tr)
-숲_표준화 = make_pipeline(StandardScaler(), RandomForestClassifier(n_estimators=200, random_state=0)).fit(Xc_tr, yc_tr)
+숲_표준화 = make_pipeline(
+    StandardScaler(), RandomForestClassifier(n_estimators=200, random_state=0)
+).fit(Xc_tr, yc_tr)
 print(f"\n[1-1] 트리는 표준화가 필요 없다")
 print(f"    표준화 안 하고  정확도 {숲_생.score(Xc_te, yc_te):.4f}")
 print(f"    표준화 하고     정확도 {숲_표준화.score(Xc_te, yc_te):.4f}   <- 똑같음")
@@ -166,7 +174,7 @@ print(f"    표준화 하고     정확도 {숲_표준화.score(Xc_te, yc_te):.4
 
 
 # =====================================================================
-# 2. 트리 하나는 위험하다 — 깊이를 안 막으면 통째로 외운다
+# 2. 트리 하나는 위험하다 — 깊이를 안 막으면 통째p로 외운다
 # =====================================================================
 # 트리는 질문을 계속 늘리면 학습 데이터를 한 개씩 다 가둘 수 있습니다.
 # 그러면 학습 점수는 만점이 되고, 새 데이터에서는 무너집니다. 02 에서 본 그 과적합이에요.
@@ -176,7 +184,9 @@ print("[2] 트리 깊이를 바꿔 가며 (공정온도 예측)")
 for 깊이 in [2, 3, 5, None]:
     t = DecisionTreeRegressor(max_depth=깊이, random_state=0).fit(Xr_tr, yr_tr)
     이름 = "제한 없음" if 깊이 is None else f"깊이 {깊이}"
-    print(f"    {이름:8s} -> train {t.score(Xr_tr, yr_tr):6.3f}   test {t.score(Xr_te, yr_te):6.3f}")
+    print(
+        f"    {이름:8s} -> train {t.score(Xr_tr, yr_tr):6.3f}   test {t.score(Xr_te, yr_te):6.3f}"
+    )
 # 제한 없음: train 1.000 / test 0.342. 학습 데이터를 통째로 외운 겁니다.
 # 02 에서 5대만 주고 학습했을 때와 똑같은 그림입니다. 손잡이를 무한정 늘리면 외웁니다.
 # ★ 용어 ★ 가지치기(pruning) = 트리가 너무 깊어지지 않게 막는 것. max_depth 가 제일 흔한 방법.
@@ -194,11 +204,15 @@ for 깊이 in [2, 3, 5, None]:
 #           XGBoost, LightGBM, CatBoost 가 전부 이 방식이고, 캐글 표 데이터 대회는 거의 이게 우승합니다.
 #           사이킷런에도 들어 있습니다: HistGradientBoosting (설치가 따로 필요 없어 수업에선 이걸 씁니다)
 print("\n[3] 한 그루 vs 숲 vs 부스팅 (공정온도 예측)")
-for 이름, 모델 in [("트리 한 그루(제한없음)", DecisionTreeRegressor(random_state=0)),
-                 ("랜덤포레스트 200그루", RandomForestRegressor(n_estimators=200, random_state=0)),
-                 ("부스팅", HistGradientBoostingRegressor(random_state=0))]:
+for 이름, 모델 in [
+    ("트리 한 그루(제한없음)", DecisionTreeRegressor(random_state=0)),
+    ("랜덤포레스트 200그루", RandomForestRegressor(n_estimators=200, random_state=0)),
+    ("부스팅", HistGradientBoostingRegressor(random_state=0)),
+]:
     m = 모델.fit(Xr_tr, yr_tr)
-    print(f"    {이름:22s} train {m.score(Xr_tr, yr_tr):6.3f}   test {m.score(Xr_te, yr_te):6.3f}")
+    print(
+        f"    {이름:22s} train {m.score(Xr_tr, yr_tr):6.3f}   test {m.score(Xr_te, yr_te):6.3f}"
+    )
 # 한 그루 0.342 -> 숲 0.645. 같은 트리인데 test 점수가 두 배가 됐습니다.
 # "여러 개를 만들어 평균 낸다" 이 한 가지 아이디어로요. 이게 앙상블입니다.
 # ★ 용어 ★ 앙상블(ensemble) = 모델 여러 개의 답을 합치는 것. 랜덤포레스트도 부스팅도 앙상블입니다.
@@ -258,37 +272,67 @@ for 이름, 모델 in [("트리 한 그루(제한없음)", DecisionTreeRegressor
 
 # ── 1판. ai4i 공정온도 예측 (200행, 센서 4개) ──
 print("\n[4] 1판 — 공정온도 예측 (200행, 관계가 거의 직선)")
-for 이름, 모델 in [("선형회귀", make_pipeline(StandardScaler(), LinearRegression())),
-                 ("랜덤포레스트", RandomForestRegressor(n_estimators=200, random_state=0)),
-                 ("부스팅", HistGradientBoostingRegressor(random_state=0))]:
+for 이름, 모델 in [
+    ("선형회귀", make_pipeline(StandardScaler(), LinearRegression())),
+    ("랜덤포레스트", RandomForestRegressor(n_estimators=200, random_state=0)),
+    ("부스팅", HistGradientBoostingRegressor(random_state=0)),
+]:
     m = 모델.fit(Xr_tr, yr_tr)
-    print(f"    {이름:14s} train {m.score(Xr_tr, yr_tr):6.3f}   test {m.score(Xr_te, yr_te):6.3f}")
-print("    -> 선형회귀 승. 00 에서 본 상관 0.89, 즉 관계가 직선이라 직선 모델이 제일 잘 맞습니다.")
+    print(
+        f"    {이름:14s} train {m.score(Xr_tr, yr_tr):6.3f}   test {m.score(Xr_te, yr_te):6.3f}"
+    )
+print(
+    "    -> 선형회귀 승. 00 에서 본 상관 0.89, 즉 관계가 직선이라 직선 모델이 제일 잘 맞습니다."
+)
 print("       데이터도 200행뿐이라 트리가 배울 게 부족합니다.")
 
 # ── 2판. 압연 고진동 분류 (570행, 특징 10개) ──
 r = pd.read_csv(os.path.join(DATA, "T-CR1-SPM01_압연특징.csv"), encoding="utf-8-sig")
 경계 = r["VIB-BOT_RMS"].quantile(0.90)
-y_고진동 = (r["VIB-BOT_RMS"] >= 경계).astype(int).values     # 06 §3 과 같은 '상위 10%' 규칙 라벨.
+y_고진동 = (
+    (r["VIB-BOT_RMS"] >= 경계).astype(int).values
+)  # 06 §3 과 같은 '상위 10%' 규칙 라벨.
 #   06 은 상부(VIB-TOP)를 정답으로 삼았고 여기선 하부(VIB-BOT)입니다. 채널만 반대이고 방식은 같습니다
-입력열 = [c for c in r.columns if c.startswith(("VIB-TOP", "CUR-MTR"))]   # 정답 만든 열은 제외 (06 §3 의 그 함정)
+입력열 = [
+    c for c in r.columns if c.startswith(("VIB-TOP", "CUR-MTR"))
+]  # 정답 만든 열은 제외 (06 §3 의 그 함정)
 Xv = r[입력열].values
-v_tr, v_te, vy_tr, vy_te = train_test_split(Xv, y_고진동, test_size=0.3, random_state=42, stratify=y_고진동)
+v_tr, v_te, vy_tr, vy_te = train_test_split(
+    Xv, y_고진동, test_size=0.3, random_state=42, stratify=y_고진동
+)
 print(f"\n    2판 — 압연 고진동 분류 (570행, 특징 {len(입력열)}개)")
-for 이름, 모델 in [("로지스틱 회귀", make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000, class_weight="balanced"))),
-                 ("랜덤포레스트", RandomForestClassifier(n_estimators=300, class_weight="balanced", random_state=0)),
-                 ("부스팅", HistGradientBoostingClassifier(random_state=0))]:
+for 이름, 모델 in [
+    (
+        "로지스틱 회귀",
+        make_pipeline(
+            StandardScaler(), LogisticRegression(max_iter=2000, class_weight="balanced")
+        ),
+    ),
+    (
+        "랜덤포레스트",
+        RandomForestClassifier(
+            n_estimators=300, class_weight="balanced", random_state=0
+        ),
+    ),
+    ("부스팅", HistGradientBoostingClassifier(random_state=0)),
+]:
     m = 모델.fit(v_tr, vy_tr)
     p = m.predict(v_te)
-    print(f"    {이름:14s} 재현율 {recall_score(vy_te, p):.2f}  정밀도 {precision_score(vy_te, p, zero_division=0):.2f}"
-          f"  F1 {f1_score(vy_te, p, zero_division=0):.2f}")
-print("    -> 랜덤포레스트 승. F1 0.80 대 0.62. 특징이 10개고 관계가 직선이 아니라 트리가 유리합니다.")
+    print(
+        f"    {이름:14s} 재현율 {recall_score(vy_te, p):.2f}  정밀도 {precision_score(vy_te, p, zero_division=0):.2f}"
+        f"  F1 {f1_score(vy_te, p, zero_division=0):.2f}"
+    )
+print(
+    "    -> 랜덤포레스트 승. F1 0.80 대 0.62. 특징이 10개고 관계가 직선이 아니라 트리가 유리합니다."
+)
 
 # 같은 사람이, 같은 도구로, 같은 날 돌렸는데 승자가 다릅니다.
 # 그러니까 "무슨 모델이 제일 좋아요?" 라는 질문에는 답이 없습니다. 돌려 봐야 압니다.
 
 # 트리의 세 번째 장점: 어느 특징이 중요했는지 바로 알려 줍니다
-숲 = RandomForestClassifier(n_estimators=300, class_weight="balanced", random_state=0).fit(Xv, y_고진동)
+숲 = RandomForestClassifier(
+    n_estimators=300, class_weight="balanced", random_state=0
+).fit(Xv, y_고진동)
 print("\n[4-1] 랜덤포레스트가 꼽은 중요한 특징 5개")
 for 이름, 값 in sorted(zip(입력열, 숲.feature_importances_), key=lambda t: -t[1])[:5]:
     print(f"    {이름:14s} {값:.3f}")
@@ -355,12 +399,14 @@ for 이름, 값 in sorted(zip(입력열, 숲.feature_importances_), key=lambda t
 # =====================================================================
 # 위에서 우리가 한 게 바로 그것입니다. 5줄짜리 for 문이었어요.
 # 실무에서도 이렇게 합니다. 후보를 리스트에 담고, 교차검증으로 돌리고, 표를 보고 고릅니다.
-후보 = [("선형회귀", make_pipeline(StandardScaler(), LinearRegression())),
-       ("랜덤포레스트", RandomForestRegressor(n_estimators=200, random_state=0)),
-       ("부스팅", HistGradientBoostingRegressor(random_state=0))]
+후보 = [
+    ("선형회귀", make_pipeline(StandardScaler(), LinearRegression())),
+    ("랜덤포레스트", RandomForestRegressor(n_estimators=200, random_state=0)),
+    ("부스팅", HistGradientBoostingRegressor(random_state=0)),
+]
 print("\n[5] 후보를 교차검증으로 한꺼번에 (공정온도 예측, test 는 손도 안 댐)")
 for 이름, 모델 in 후보:
-    cv = cross_val_score(모델, Xr_tr, yr_tr, cv=5)          # 학습용 안에서만 (04 §7)
+    cv = cross_val_score(모델, Xr_tr, yr_tr, cv=5)  # 학습용 안에서만 (04 §7)
     print(f"    {이름:14s} CV 평균 {cv.mean():.3f}   (조각별 {cv.round(2)})")
 # 이 표를 보고 하나를 고른 다음, 그 모델로 test 를 딱 한 번 봅니다. 그게 04 §7 에서 배운 순서예요.
 # 튜닝(손잡이 조절)은 그다음입니다. 모델을 고르기 전에 튜닝부터 하면 시간만 버립니다.
