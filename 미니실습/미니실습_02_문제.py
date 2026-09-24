@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 # 데이터 읽기는 오늘 연습할 내용이 아니라서 드립니다. 여기서부터가 여러분 몫입니다.
-DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용데이터")
+DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용_데이터")
 df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8-sig")
 특징이름 = ["공기온도", "회전수", "토크", "공구마모"]
 
@@ -56,10 +56,17 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 #
 # 나와야 하는 것
 #     X (200, 4)   학습용 140대 / 시험용 60대
+X = df[특징이름].values.astype(float)
+y = df["공정온도"].values.astype(float)
 
+rng = np.random.RandomState(42)
+순서 = rng.permutation(len(X))
+n_train = int(len(X) * 0.7)
+tr, te = (순서[:n_train], 순서[n_train:])
+X_train, X_test = X[tr], X[te]
+y_train, y_test = y[tr], y[te]
 
-
-
+print(f"X {X.shape}     학습용 {len(tr)} / 시험용 {len(te)}")
 
 
 # =====================================================================
@@ -82,12 +89,25 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 #     시험용 열별 평균 [-0.267 -0.08   0.047 -0.122]
 #
 # ★ 생각할 것 ★ 시험용 평균이 0 이 아닙니다. 이건 잘못된 걸까요?
-#   (답 →                                                               )
+#   (답 → 시험용은 학습용의 평균과 표준편차를 사용했기 때문에 평균이 반드시 0이 되지는 않음)
 
+mu = X_train.mean(axis=0)
+sd = X_train.std(axis=0)
 
+Z_train = (X_train - mu) / sd
+Z_test = (X_test - mu) / sd
 
+# 학습용 데이터는 자기 자신의 평균과 표준편차로 표준화했기 때문에 열별 평균이 이론적으로 0이 됨
+# 그런데 컴퓨터가 소수점을 계산하는 과정에서 아주 작은 오차가 생길 가능성 있음
+# np.abs()를 사용해 음수 부호를 없애고 깔끔하게 출력한 것
+print(
+    f"학습용 열별 평균 {np.abs(Z_train.mean(axis=0)).round(3)}    퍼짐 {Z_train.std(axis=0).round(3)}"
+)
 
-
+# 여기서 음수와 양수는 의미가 있음!
+# 예를 들어 -0.267은 시험용 공기온도의 평균이 학습용 평균보다 낮다는 뜻
+# 따라서 시험용 평균에는 np.abs()를 사용하지 않고 양수와 음수 부호를 그대로 보여주는 것
+print(f"시험용 열별 평균 {Z_test.mean(axis=0).round(3)}")
 
 # =====================================================================
 # C. 학습 — 01 과 한 글자도 안 다릅니다, w 가 4개일 뿐         (02 §4, §5)
@@ -117,8 +137,59 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 #   여기선 차이가 0.03 이라 건강합니다. 0.10 넘으면 의심하세요.
 
 
+def 예측(Z, w, b):
+    return Z @ w + b
 
 
+def 손실(Z, y, w, b):
+    return np.mean((y - 예측(Z, w, b)) ** 2)
+
+
+h = 0.0001
+
+
+def 기울기_밟아보기(Z, y, w, b):
+    gw = np.zeros(len(w))  # 가중치 4개의 기울기를 저장할 배열
+    for j in range(len(w)):
+        w_plus = w.copy()  # 원본을 변경하지 않도록 복사
+        w_minus = w.copy()  # 반대 방향으로 움직일 복사본
+        w_plus[j] += h  # j번째만 살짝 키우기
+        w_minus[j] -= h  # j번째만 살짝 줄이기
+        gw[j] = (손실(Z, y, w_plus, b) - 손실(Z, y, w_minus, b)) / (2 * h)
+    gb = (손실(Z, y, w, b + h) - 손실(Z, y, w, b - h)) / (2 * h)
+    return gw, gb
+
+
+def 학습(Z, y, lr=0.1, epochs=300):
+    w = np.zeros(Z.shape[1])  # 센서 열 개수만큼 가중치를 만들고 0으로 초기화
+    b = 0.0  # 절편을 0으로 초기화
+    for _ in range(epochs):
+        gw, gb = 기울기_밟아보기(Z, y, w, b)
+        w = w - lr * gw
+        b = b - lr * gb
+    return w, b  # 학습이 끝난 가중치와 절편 반환
+
+
+def R2(y, yhat):
+    # 1 - (예측 오차의 제곱합 / 실제값을 평균으로 예측했을 때의 오차 제곱합)
+    return 1 - np.sum((y - yhat) ** 2) / np.sum((y - y.mean()) ** 2)
+
+
+w, b = 학습(Z_train, y_train)
+
+train_predict = 예측(Z_train, w, b)
+test_predict = 예측(Z_test, w, b)
+
+print(
+    f"학습용      R2 {R2(y_train, train_predict):.4f}  손실 {손실(Z_train, y_train, w, b):.3f}"
+)
+print(
+    f"시험용      R2 {R2(y_test, test_predict):.4f}  손실 {손실(Z_test, y_test, w, b):.3f}"
+)
+# 시험용 점수가 조금 낮지만 학습에 사용하지 않은 데이터에서도 비슷한 수준의 예측 성능을 보이고 있음
+# 모델이 학습용 데이터만 외운 것이 아니라 시험용 데이터에도 적용되는 규칙을 어느 정도 배웠다고 해석
+# 다만 차이가 작다는 사실만으로 모델의 성능이 충분히 좋다고 확정할 수는 없음
+# 두 점수의 수준도 함께 확인할 것!
 
 
 # =====================================================================
@@ -145,11 +216,37 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 #   학습용 점수만 보고 "좋아졌다" 며 현장에 넣으면 정확히 이 사고가 납니다.
 #
 # ★ 생각할 것 ★ 가짜 센서를 140개(= 학습용 설비 수)까지 늘리면 학습용 R2 는 어떻게 될까요?
-#   (답 →                                                               )
+#   (답 → 0.9908
+#         가짜 센서를 140개까지 늘리면 모델이 학습용 데이터의 우연한 패턴까지 외울 수 있어 학습용 R²가 1에 가까워짐
+#         하지만 이는 실제 예측 성능이 좋아졌다는 뜻이 아니라 과적합이 발생할 가능성이 커졌다는 의미)
 
+print("가짜센서     학습용 R2     시험용 R2")
 
+for k in [0, 30, 60, 100, 140]:
+    가짜센서 = np.random.RandomState(0).normal(size=(len(X), k))
 
+    # np.hstack() : 여러 개의 배열을 가로 방향으로 이어 붙여 하나로 합쳐주는 NumPy 함수
+    # 기존 센서 4개와 가짜 센서 합치기
+    X_fake = np.hstack([X, 가짜센서])
 
+    X_fake_train = X_fake[tr]
+    X_fake_test = X_fake[te]
+
+    mu_fake = X_fake_train.mean(axis=0)
+    sd_fake = X_fake_train.std(axis=0)
+
+    Z_fake_train = (X_fake_train - mu_fake) / sd_fake
+    Z_fake_test = (X_fake_test - mu_fake) / sd_fake
+
+    w_fake, b_fake = 학습(Z_fake_train, y_train, lr=0.1, epochs=300)
+
+    train_fake_predict = 예측(Z_fake_train, w_fake, b_fake)
+    test_fake_predict = 예측(Z_fake_test, w_fake, b_fake)
+
+    train_fake_r2 = R2(y_train, train_fake_predict)
+    test_fake_r2 = R2(y_test, test_fake_predict)
+
+    print(f"{k}개           {train_fake_r2:.4f}         {test_fake_r2:.4f}")
 
 
 # =====================================================================
@@ -168,8 +265,13 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 공기온도가 압도적이고 나머지는 사실상 0 입니다. 공정온도는 공기온도 하나로 거의 정해집니다.
 
 
+# zip() : 센서 이름과 해당 가중치를 하나씩 짝지음
+# abs(t[1]) : 각 짝에서 두 번째 값인 가중치의 절댓값
+# -abs(t[1]) : 절댓값이 큰 가중치부터 정렬하기 위한 기준
+s_result = sorted(zip(특징이름, w), key=lambda t: -abs(t[1]))
 
-
+for 이름, wi in s_result:
+    print(f"{이름}      {wi:+.3f}")
 
 
 # =====================================================================
@@ -178,16 +280,31 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 지금 실행하면 전부 [ ] 입니다. 위를 채워 갈수록 하나씩 [O] 로 바뀝니다.
 # 여기서 쓰는 이름: X, y, X_train, X_test, y_train, y_test, Z_train, Z_test, 예측, 손실, R2, w, b
 검사 = [
-    ("나누기",   "len(X_train) == 140 and len(X_test) == 60 and len(y_train) == 140",
-                 "70%/30% 로 나뉘어야 합니다 (140 / 60)"),
-    ("표준화",   "abs(Z_train.mean()) < 1e-9 and abs(Z_train.std(axis=0).mean() - 1) < 1e-9 and abs(Z_test.mean()) > 1e-3",
-                 "학습용은 평균 0·퍼짐 1, 시험용은 0 이 아니어야 합니다 (학습용 자를 빌려 썼으니까)"),
-    ("예측",     "예측(Z_train, w, b).shape == (140,)",
-                 "Z @ w + b 입니다. 140대분 예측 140개가 나와야 합니다"),
-    ("R2",       "abs(R2(y_train, 예측(Z_train, w, b)) - 0.8079) < 0.01",
-                 "학습용 R2 가 0.8079 근처여야 합니다"),
-    ("일반화",   "abs(R2(y_test, 예측(Z_test, w, b)) - 0.7800) < 0.01",
-                 "시험용 R2 가 0.78 근처여야 합니다. 많이 낮으면 표준화 자를 잘못 쓴 겁니다"),
+    (
+        "나누기",
+        "len(X_train) == 140 and len(X_test) == 60 and len(y_train) == 140",
+        "70%/30% 로 나뉘어야 합니다 (140 / 60)",
+    ),
+    (
+        "표준화",
+        "abs(Z_train.mean()) < 1e-9 and abs(Z_train.std(axis=0).mean() - 1) < 1e-9 and abs(Z_test.mean()) > 1e-3",
+        "학습용은 평균 0·퍼짐 1, 시험용은 0 이 아니어야 합니다 (학습용 자를 빌려 썼으니까)",
+    ),
+    (
+        "예측",
+        "예측(Z_train, w, b).shape == (140,)",
+        "Z @ w + b 입니다. 140대분 예측 140개가 나와야 합니다",
+    ),
+    (
+        "R2",
+        "abs(R2(y_train, 예측(Z_train, w, b)) - 0.8079) < 0.01",
+        "학습용 R2 가 0.8079 근처여야 합니다",
+    ),
+    (
+        "일반화",
+        "abs(R2(y_test, 예측(Z_test, w, b)) - 0.7800) < 0.01",
+        "시험용 R2 가 0.78 근처여야 합니다. 많이 낮으면 표준화 자를 잘못 쓴 겁니다",
+    ),
 ]
 
 print()
@@ -209,4 +326,8 @@ for 이름, 검사식, 메시지 in 검사:
     남은것 += 0 if 통과 else 1
 
 print("=" * 60)
-print("    자체 점검 통과" if 남은것 == 0 else f"    {남은것}개 남았습니다. 위에서부터 하나씩 하세요")
+print(
+    "    자체 점검 통과"
+    if 남은것 == 0
+    else f"    {남은것}개 남았습니다. 위에서부터 하나씩 하세요"
+)
