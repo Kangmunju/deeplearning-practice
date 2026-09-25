@@ -38,7 +38,7 @@ import numpy as np
 import pandas as pd
 
 # 데이터 읽기는 오늘 연습할 내용이 아니라서 드립니다. 여기서부터가 여러분 몫입니다.
-DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용데이터")
+DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용_데이터")
 df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8-sig")
 특징이름 = ["공기온도", "회전수", "토크", "공구마모"]
 
@@ -62,9 +62,12 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 #   정확도 96% 가 나옵니다. [D] 에서 이걸 직접 확인할 겁니다.
 #   고장 설비는 마모가 두 배(224 vs 113)입니다. 이 차이를 모델이 스스로 찾아내게 하는 게 목표입니다.
 
-
-
-
+X = df[특징이름].values.astype(float)
+y = df["고장여부"].values.astype(float)
+print(f"고장 {int(y.sum())}대 / 전체 {len(y)}대  → 고장비율 {y.mean():.1%}%")
+print(
+    f"고장 설비 평균 공구마모 {round(df[df.고장여부 == 1]['공구마모'].mean(), 1)} / 정상 설비 {round(df[df.고장여부 == 0]['공구마모'].mean(), 1)}"
+)
 
 
 # =====================================================================
@@ -85,9 +88,27 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 나와야 하는 것
 #     학습용 140대 (고장 6) / 시험용 60대 (고장 2)
 
+rng = np.random.RandomState(3)
 
+고장idx = rng.permutation(np.where(y == 1)[0])
+정상idx = rng.permutation(np.where(y == 0)[0])
 
+tr = np.concatenate([고장idx[:6], 정상idx[:134]])
+te = np.concatenate([고장idx[6:], 정상idx[134:]])
 
+X_train = X[tr]
+X_test = X[te]
+y_train = y[tr]
+y_test = y[te]
+
+print(
+    f"학습용 {len(y_train)}대 (고장 {int(y_train.sum())}) / 시험용 {len(y_test)}대 (고장 {int(y_test.sum())})"
+)
+
+mu = X_train.mean(axis=0)
+sd = X_train.std(axis=0)
+Z_train = (X_train - mu) / sd
+Z_test = (X_test - mu) / sd
 
 
 # =====================================================================
@@ -126,8 +147,56 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 #   걷는 것만이 유일한 방법입니다. 경사하강을 손으로 배운 이유가 여기서부터 진짜로 나옵니다.
 
 
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
 
 
+def 확률(Z, w, b):
+    # sigmoid() : 직선값을 고장일 확률로 변환
+    return sigmoid(Z @ w + b)
+
+
+def 손실(Z, y, w, b):
+    p = 확률(Z, w, b)
+    p = np.clip(p, 1e-12, 1 - 1e-12)
+    return -np.mean(y * np.log(p) + (1 - y) * np.log(1 - p))
+
+
+h = 0.0001
+
+
+def 기울기_밟아보기(Z, y, w, b):
+    gw = np.zeros(len(w))
+    for j in range(len(w)):
+        w_plus = w.copy()
+        w_minus = w.copy()
+        w_plus[j] += h
+        w_minus[j] -= h
+        gw[j] = (손실(Z, y, w_plus, b) - (손실(Z, y, w_minus, b))) / (2 * h)
+    gb = (손실(Z, y, w, b + h) - (손실(Z, y, w, b - h))) / (2 * h)
+    return gw, gb
+
+
+def 학습(Z, y, lr=0.5, epochs=2000):
+    w = np.zeros(Z.shape[1])
+    b = 0.0
+    for epoch in range(epochs):
+        gw, gb = 기울기_밟아보기(Z, y, w, b)
+        w = w - lr * gw
+        b = b - lr * gb
+        if epoch % 400 == 0:
+            print(f"epoch   {epoch}    손실 {round(손실(Z, y, w, b), 4)}")
+    return w, b
+
+
+w, b = 학습(Z_train, y_train, lr=0.5, epochs=2000)
+
+정렬결과 = sorted(zip(특징이름, w), key=lambda t: -abs(t[1]))
+
+print("가중치: ")
+# 가중치:  공구마모 +2.367,  회전수 +0.566,  공기온도 -0.427,  토크 +0.239
+for 이름, wi in 정렬결과:
+    print(f"{이름}  {wi:+.3f}")
 
 
 # =====================================================================
@@ -153,11 +222,46 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 #   정확도는 '어떻게 틀렸나' 를 못 보여 줍니다. 그래서 네 칸으로 쪼개는 겁니다.
 #
 # ★ 생각할 것 ★ 이 설비가 제철소 압연기라면, FN(놓침) 1대와 FP(헛경보) 1대 중 어느 쪽이 더 비쌀까요?
-#   (답 →                                                               )
+#   (답 → 고장을 놓친 FN은 설비 손상이나 예상치 못한 가동 중단으로 이어질 수 있음
+#         반면 FP는 정상 설비를 고장으로 판단해 불필요한 점검이나 가동 중단을 일으킬 수 있음
+#         따라서 어느 쪽의 비용이 더 큰지는 실제 설비의 고장 위험과 점검/가동 중단 비용을 비교해 판단할 것)
+
+P_test = 확률(Z_test, w, b)
+
+# astype(int) : True를 1로, False를 0으로 변환
+판정 = (P_test >= 0.5).astype(int)
 
 
+def 네칸(y, 판정):
+    # .sum() 으로 True 개수 세기
+    TP = int(((y == 1) & (판정 == 1)).sum())  # 고장을 고장이라 함 (잡음)
+    FN = int(((y == 1) & (판정 == 0)).sum())  # 고장을 정상이라 함 (놓침)
+    FP = int(((y == 0) & (판정 == 1)).sum())  # 정상을 고장이라 함 (헛경보)
+    TN = int(((y == 0) & (판정 == 0)).sum())  # 정상을 정상이라 함 (통과)
+    return TP, FN, FP, TN
 
 
+# 예측한 판정과 실제 정답이 같으면 T, 다르면 F
+# True의 평균 = 전체 60대 중 맞힌 비율
+정확도 = np.mean(판정 == y_test)
+
+TP, FN, FP, TN = 네칸(y_test, 판정)
+
+#     정확도 0.983
+#     고장 2대 중  잡음(TP) 1  놓침(FN) 1
+#     정상 58대 중 통과(TN) 58  헛경보(FP) 0
+print(f"정확도 {정확도:.3f}")
+print(f"고장 {int(y_test.sum())}대 중 잡음(TP) {TP}  놓침(FN) {FN}")
+print(f"정상 {int((y_test == 0).sum())}대 중 통과(TN) {TN}  헛경보(FP) {FP}")
+# 전체 60대 중 59대를 맞혔기 때문에 정확도는 약 98.3%
+# 하지만 실제 고장 설비가 2대뿐이기 때문에 그중 1대를 놓쳤다는 사실은 정확도만으로는 잘 드러나지 않음
+
+#     [비교] 무조건 '정상' 이라 답하면 → 정확도 0.967, 잡은 고장 0대
+게으른판정 = np.zeros_like(y_test, dtype=int)
+게으른TP, 게으른FN, 게으른FP, 게으른TN = 네칸(y_test, 게으른판정)
+print(
+    f"[비교] 무조건 '정상' 이라 답하면 → 정확도 {np.mean(게으른판정 == y_test):.3f}, 잡은 고장 {게으른TP}"
+)
 
 
 # =====================================================================
@@ -183,10 +287,23 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 어느 쪽을 택할지는 코드가 아니라 현장이 정합니다. 설비를 세우는 비용 vs 재검사 비용.
 #
 # ★ 생각할 것 ★ 임계값을 0 으로 내리면 재현율과 정밀도는 각각 얼마가 될까요?
-#   (답 →                                                               )
+#   (답 → 재현율 1.0, 정밀도 0.03
+#        고장 확률은 0 이상이므로 임계값을 0으로 설정하면 시험용 설비 60대 모두 고장이라고 판정)
 
+print("임계값  잡음    놓침    헛경보    재현율    정밀도")
+for th in [0.5, 0.3, 0.1, 0.05, 0.00]:
+    판정_th = (P_test >= th).astype(int)
+    TP, FN, FP, TN = 네칸(y_test, 판정_th)
 
+    # 실제 고장 중 몇 개나 잡았나 — 놓침을 본다
+    재현율 = TP / (TP + FN)
 
+    # 고장이라 한 것 중 진짜가 몇 개냐 — 헛경보를 본다
+    정밀도 = TP / (TP + FP)
+
+    print(
+        f"{th}     {TP}       {FN}        {FP}        {round(재현율, 2)}      {round(정밀도, 2)}"
+    )
 
 
 # =====================================================================
@@ -195,20 +312,41 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 지금 실행하면 전부 [ ] 입니다. 위를 채워 갈수록 하나씩 [O] 로 바뀝니다.
 # 여기서 쓰는 이름: X, y, Z_train, Z_test, y_train, y_test, sigmoid, 확률, 손실, 네칸, w, b
 검사 = [
-    ("불균형", 'abs(y.mean() - 0.04) < 1e-9 and len(y) == 200',
-     'y 는 고장여부(0/1) 여야 합니다. 고장 8대 / 200대'),
-    ("나누기", 'int(y_train.sum()) == 6 and int(y_test.sum()) == 2 and len(y_test) == 60',
-     '고장이 학습 6 / 시험 2 로 갈려야 합니다. 그냥 무작위로 섞으면 이렇게 안 됩니다'),
-    ("sigmoid", 'abs(sigmoid(0) - 0.5) < 1e-12 and sigmoid(1000) <= 1.0 and sigmoid(-1000) >= 0.0',
-     'sigmoid(0) 은 0.5 이고, 어떤 수를 넣어도 0~1 을 벗어나면 안 됩니다'),
-    ("로그손실", 'abs(손실(Z_train, y_train, np.zeros(4), 0.0) - 0.693147) < 1e-4',
-     'w=0, b=0 이면 전부 확률 0.5 이므로 손실은 -log(0.5) = 0.6931 이어야 합니다'),
-    ("학습", '손실(Z_train, y_train, w, b) < 0.13',
-     '학습 후 손실이 0.13 아래여야 합니다. lr=0.5, epochs=2000 을 확인하세요'),
-    ("네칸", 'sum(네칸(y_test, (확률(Z_test, w, b) >= 0.5).astype(int))) == 60 and 네칸(y_test, (확률(Z_test, w, b) >= 0.5).astype(int))[0] == 1',
-     '네 칸의 합은 시험용 전체 대수(60)여야 하고, 0.5 에서 잡은 고장은 1대입니다'),
-    ("임계값", '네칸(y_test, (확률(Z_test, w, b) >= 0.1).astype(int))[1] == 0',
-     '임계값 0.1 이면 놓침(FN)이 0 이어야 합니다'),
+    (
+        "불균형",
+        "abs(y.mean() - 0.04) < 1e-9 and len(y) == 200",
+        "y 는 고장여부(0/1) 여야 합니다. 고장 8대 / 200대",
+    ),
+    (
+        "나누기",
+        "int(y_train.sum()) == 6 and int(y_test.sum()) == 2 and len(y_test) == 60",
+        "고장이 학습 6 / 시험 2 로 갈려야 합니다. 그냥 무작위로 섞으면 이렇게 안 됩니다",
+    ),
+    (
+        "sigmoid",
+        "abs(sigmoid(0) - 0.5) < 1e-12 and sigmoid(1000) <= 1.0 and sigmoid(-1000) >= 0.0",
+        "sigmoid(0) 은 0.5 이고, 어떤 수를 넣어도 0~1 을 벗어나면 안 됩니다",
+    ),
+    (
+        "로그손실",
+        "abs(손실(Z_train, y_train, np.zeros(4), 0.0) - 0.693147) < 1e-4",
+        "w=0, b=0 이면 전부 확률 0.5 이므로 손실은 -log(0.5) = 0.6931 이어야 합니다",
+    ),
+    (
+        "학습",
+        "손실(Z_train, y_train, w, b) < 0.13",
+        "학습 후 손실이 0.13 아래여야 합니다. lr=0.5, epochs=2000 을 확인하세요",
+    ),
+    (
+        "네칸",
+        "sum(네칸(y_test, (확률(Z_test, w, b) >= 0.5).astype(int))) == 60 and 네칸(y_test, (확률(Z_test, w, b) >= 0.5).astype(int))[0] == 1",
+        "네 칸의 합은 시험용 전체 대수(60)여야 하고, 0.5 에서 잡은 고장은 1대입니다",
+    ),
+    (
+        "임계값",
+        "네칸(y_test, (확률(Z_test, w, b) >= 0.1).astype(int))[1] == 0",
+        "임계값 0.1 이면 놓침(FN)이 0 이어야 합니다",
+    ),
 ]
 
 print()
@@ -230,4 +368,8 @@ for 이름, 검사식, 메시지 in 검사:
     남은것 += 0 if 통과 else 1
 
 print("=" * 60)
-print("    자체 점검 통과" if 남은것 == 0 else f"    {남은것}개 남았습니다. 위에서부터 하나씩 하세요")
+print(
+    "    자체 점검 통과"
+    if 남은것 == 0
+    else f"    {남은것}개 남았습니다. 위에서부터 하나씩 하세요"
+)
