@@ -36,6 +36,18 @@ import os
 import numpy as np
 import pandas as pd
 
+from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.model_selection import (
+    train_test_split,
+    cross_val_predict,
+    cross_val_score,
+    GridSearchCV,
+)
+from sklearn.metrics import confusion_matrix, recall_score, precision_score
+from sklearn.neighbors import KNeighborsRegressor
+
 # 데이터 읽기는 오늘 연습할 내용이 아니라서 드립니다. 여기서부터가 여러분 몫입니다.
 # import 도 직접 쓰세요. 어느 서랍에서 뭘 꺼내는지 외우는 게 04 의 절반입니다.
 #   sklearn.linear_model    LinearRegression, LogisticRegression, Ridge
@@ -44,7 +56,7 @@ import pandas as pd
 #   sklearn.model_selection train_test_split, cross_val_score
 #   sklearn.metrics         confusion_matrix, recall_score, precision_score
 #   sklearn.neighbors       KNeighborsRegressor
-DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용데이터")
+DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용_데이터")
 df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8-sig")
 특징이름 = ["공기온도", "회전수", "토크", "공구마모"]
 
@@ -74,9 +86,33 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 02 에서 손으로 얻은 값(0.8079 / 0.7800, 공기온도 +1.791)과 비슷하지만 똑같진 않습니다.
 # 섞는 방식이 달라 나뉜 설비가 다르기 때문입니다. 같은 일을 했다는 게 중요하지, 소수점은 중요하지 않습니다.
 
+X = df[특징이름].values  # 센서 4개
+y = df["공정온도"].values  # 공정온도
 
 
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42
+)
 
+scaler = StandardScaler()  # 표준화 도구
+
+scaler.fit(X_train)  # 학습용의 평균과 표준편차를 외움
+
+Z_train = scaler.transform(X_train)  # 외운 값으로 변환
+
+Z_test = scaler.transform(X_test)  # 시험용도 학습용 눈금으로
+
+모델 = LinearRegression()
+
+# fit() : 데이터의 특징을 학습하거나 모델을 데이터에 맞추는 메서드
+모델.fit(Z_train, y_train)
+
+print(f"학습용 R2 {모델.score(Z_train, y_train):.4f}")
+print(f"시험용 R2 {모델.score(Z_test, y_test):.4f}")
+
+# .coef_: 사이킷런등에서 학습이 완료된 선형 회귀 모델의 회귀 계수(가중치, 기울기)를 저장하는 속성
+for 이름, 가중치 in zip(특징이름, 모델.coef_):
+    print(f"{이름} {가중치:+.3f}")
 
 
 # =====================================================================
@@ -109,11 +145,35 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 02 의 표준화 누수, 여기의 중복 누수 — 누수는 항상 "점수를 좋아 보이게" 만듭니다. 그래서 무섭습니다.
 #
 # ★ 생각할 것 ★ 점수가 이상하게 좋을 때 제일 먼저 의심해야 하는 건 무엇일까요?
-#   (답 →                                                               )
+#   (답 → 데이터 누수가 발생했는지 확인)
+
+pipe = make_pipeline(StandardScaler(), LinearRegression())
+pipe.fit(X_train, y_train)
+print(f"시험용 R2 {pipe.score(X_test, y_test):.4f}")
 
 
+# 사이킷런에서 X는 항상 2차원 표 형태여야 하므로 대괄호를 두 번 감쌈([[]])
+# predict()로 공정온도를 예측하고
+# [0]으로 나온 예측값 배열에서 첫 번째 값을 꺼냄
+print(
+    f"새 설비 [300, 1500, 40, 100] → 공정온도 {pipe.predict([[300, 1500, 40, 100]])[0]:.2f}"
+)
+
+이웃 = lambda: make_pipeline(StandardScaler(), KNeighborsRegressor(n_neighbors=1))
+X중복 = np.vstack([X, X])  # X는 2차원 표
+y중복 = np.concatenate([y, y])  # y는 1차원 한 줄
+d_tr, d_te, dy_tr, dy_te = train_test_split(
+    X중복, y중복, test_size=0.3, random_state=42
+)
 
 
+print("[누수]")
+print(
+    f"중복 행을 안 지우고 나누면 시험용 R2 {이웃().fit(d_tr, dy_tr).score(d_te, dy_te):.4f}"
+)
+print(
+    f"중복을 지우면 시험용 R2 {이웃().fit(X_train, y_train).score(X_test, y_test):.4f}"
+)
 
 
 # =====================================================================
@@ -145,9 +205,35 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 #   고장 2대를 다 놓쳤는데 정확도는 훌륭합니다. 도구를 써도 이 함정은 그대로 있습니다.
 #   도구가 늘어도 '무엇을 봐야 하는가' 는 사람이 정해야 합니다.
 
+yc = df["고장여부"].values
 
+# stratify=yc : 정상/고장 비율을 학습용과 시험용에 비슷하게 유지해서 나눔
+Xc_tr, Xc_te, yc_tr, yc_te = train_test_split(
+    X, yc, test_size=0.3, random_state=3, stratify=yc
+)
 
+분류 = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000))
+분류.fit(Xc_tr, yc_tr)
 
+print(f"정확도 {분류.score(Xc_te, yc_te):.3f}")
+
+판정 = 분류.predict(Xc_te)
+print(f"혼동행렬 {confusion_matrix(yc_te, 판정)}")
+
+print(
+    f"재현율 {recall_score(yc_te, 판정, zero_division=0):.2f}   정밀도 {precision_score(yc_te, 판정, zero_division=0):.2f}"
+)
+
+# 각 설비가 고장(1)일 확률만 가져옴
+p = 분류.predict_proba(Xc_te)[:, 1]
+for th in [0.5, 0.2, 0.1]:
+    판정 = (p >= th).astype(int)
+    print(
+        f"{th}    재현율 {recall_score(yc_te, 판정, zero_division=0):.2f}   정밀도 {precision_score(yc_te, 판정, zero_division=0):.2f}"
+    )
+# 0.5    재현율 0.00   정밀도 0.00
+# 0.2    재현율 0.50   정밀도 0.20
+# 0.1    재현율 1.00   정밀도 0.17
 
 
 # =====================================================================
@@ -176,11 +262,25 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 벌점을 너무 세게 주면 가중치가 전부 0 으로 눌려서, 아무것도 말하지 않는 모델이 됩니다.
 #
 # ★ 생각할 것 ★ alpha=0.01 과 1.0 의 차이는 0.0003 입니다. 이 차이로 고르는 게 의미가 있을까요?
-#   (답 →                                                               )
+#   (답 → 교차검증 점수 차이가 0.0003으로 매우 작아 유의미한 차이라고 보기 어려움)
 
+후보 = [0.01, 1.0, 100.0, 10000.0]
 
+for a in 후보:
+    ridge = make_pipeline(StandardScaler(), Ridge(alpha=a))
+    점수 = cross_val_score(ridge, X_train, y_train, cv=5, scoring="r2")
+    print(f"alpha={a}   교차검증 R2 {점수.mean():.4f} (조각별 {np.round(점수, 3)})")
 
-
+grid = GridSearchCV(
+    make_pipeline(StandardScaler(), Ridge()),
+    {"ridge__alpha": [0.01, 1.0, 100.0, 10000.0]},
+    cv=5,
+)
+grid.fit(X_train, y_train)
+best = grid.best_params_["ridge__alpha"]
+print(
+    f"고른 alpha = {best} → 마지막에 딱 한 번 시험용 R2 {grid.score(X_test, y_test):.4f}"
+)
 
 # =====================================================================
 # 자체 점검 — 지우지 마세요
@@ -188,20 +288,41 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 지금 실행하면 전부 [ ] 입니다. 위를 채워 갈수록 하나씩 [O] 로 바뀝니다.
 # 여기서 쓰는 이름: X, y, X_train, X_test, y_train, y_test, 모델, pipe, 이웃, d_tr, d_te, dy_tr, dy_te, Xc_te, yc_te, 분류, best
 검사 = [
-    ("나누기", 'len(X_train) == 140 and len(X_test) == 60',
-     'train_test_split(X, y, test_size=0.3, random_state=42) 입니다'),
-    ("모델", 'abs(모델.coef_[0] - 1.986) < 0.01 and abs(모델.intercept_ - y_train.mean()) < 0.01',
-     '표준화한 학습용으로 LinearRegression 을 학습하세요. 공기온도 가중치가 +1.986 근처입니다'),
-    ("Pipeline", 'abs(pipe.score(X_test, y_test) - 0.7425) < 0.01 and len(pipe.steps) == 2',
-     'StandardScaler 와 LinearRegression 을 make_pipeline 으로 묶으세요'),
-    ("누수", 'abs(이웃().fit(d_tr, dy_tr).score(d_te, dy_te) - 0.8177) < 0.05',
-     '중복을 안 지운 쪽 R2 가 0.8177 근처여야 합니다'),
-    ("분류", 'abs(분류.score(Xc_te, yc_te) - 0.9667) < 0.01 and 분류.predict(Xc_te).sum() == 0',
-     'stratify=yc 와 max_iter 를 확인하세요. 0.5 에서는 고장이라 한 게 0대입니다'),
-    ("임계값", '((분류.predict_proba(Xc_te)[:, 1] >= 0.1).astype(int) * (yc_te == 1)).sum() == 2',
-     '임계값 0.1 이면 고장 2대를 다 잡아야 합니다 (재현율 1.00)'),
-    ("교차검증", 'best == 1.0',
-     'alpha 후보 4개를 cross_val_score(cv=5) 로 돌려 평균이 제일 높은 것을 best 에 담으세요'),
+    (
+        "나누기",
+        "len(X_train) == 140 and len(X_test) == 60",
+        "train_test_split(X, y, test_size=0.3, random_state=42) 입니다",
+    ),
+    (
+        "모델",
+        "abs(모델.coef_[0] - 1.986) < 0.01 and abs(모델.intercept_ - y_train.mean()) < 0.01",
+        "표준화한 학습용으로 LinearRegression 을 학습하세요. 공기온도 가중치가 +1.986 근처입니다",
+    ),
+    (
+        "Pipeline",
+        "abs(pipe.score(X_test, y_test) - 0.7425) < 0.01 and len(pipe.steps) == 2",
+        "StandardScaler 와 LinearRegression 을 make_pipeline 으로 묶으세요",
+    ),
+    (
+        "누수",
+        "abs(이웃().fit(d_tr, dy_tr).score(d_te, dy_te) - 0.8177) < 0.05",
+        "중복을 안 지운 쪽 R2 가 0.8177 근처여야 합니다",
+    ),
+    (
+        "분류",
+        "abs(분류.score(Xc_te, yc_te) - 0.9667) < 0.01 and 분류.predict(Xc_te).sum() == 0",
+        "stratify=yc 와 max_iter 를 확인하세요. 0.5 에서는 고장이라 한 게 0대입니다",
+    ),
+    (
+        "임계값",
+        "((분류.predict_proba(Xc_te)[:, 1] >= 0.1).astype(int) * (yc_te == 1)).sum() == 2",
+        "임계값 0.1 이면 고장 2대를 다 잡아야 합니다 (재현율 1.00)",
+    ),
+    (
+        "교차검증",
+        "best == 1.0",
+        "alpha 후보 4개를 cross_val_score(cv=5) 로 돌려 평균이 제일 높은 것을 best 에 담으세요",
+    ),
 ]
 
 print()
@@ -223,4 +344,8 @@ for 이름, 검사식, 메시지 in 검사:
     남은것 += 0 if 통과 else 1
 
 print("=" * 60)
-print("    자체 점검 통과" if 남은것 == 0 else f"    {남은것}개 남았습니다. 위에서부터 하나씩 하세요")
+print(
+    "    자체 점검 통과"
+    if 남은것 == 0
+    else f"    {남은것}개 남았습니다. 위에서부터 하나씩 하세요"
+)
