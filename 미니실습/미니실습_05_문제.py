@@ -35,10 +35,11 @@
 import os
 import numpy as np
 import pandas as pd
+import torch
 
 # 데이터 읽기는 오늘 연습할 내용이 아니라서 드립니다. 여기서부터가 여러분 몫입니다.
 # import torch 도 직접 쓰세요.
-DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용데이터")
+DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "수업용_데이터")
 df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8-sig")
 특징이름 = ["공기온도", "회전수", "토크", "공구마모"]
 
@@ -69,9 +70,39 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 그리고 두 번 부르면 기울기가 **쌓입니다**. 지우지 않으면 다음 걸음이 두 배가 돼요.
 # 그래서 [B] 의 루프 첫 줄이 항상 zero_grad() 입니다.
 
+x = df["공기온도"].values
+y = df["공정온도"].values
 
+x_t = torch.tensor(x, dtype=torch.float32)
+y_t = torch.tensor(y, dtype=torch.float32)
 
+w = torch.tensor(1.0, requires_grad=True)
+b = torch.tensor(9.0, requires_grad=True)
 
+# ((y - (w*x + b)) ** 2).mean()
+손실 = ((y_t - (w * x_t + b)) ** 2).mean()
+
+# backward() : 순전파를 통해 구한 손실 값에 대해 모델의 각 매개변수(tensor)가
+#              미분된 값(기울기)을 연쇄 법칙(Chain Rule)을 이용해 자동으로 기울기 계산
+# requires_grad=True 속성이 켜져 있어야 backward()를 통해 .grad 속성에 기울기가 저장됨
+# retain_graph=True : 뒤에 같은 손실로 backward()를 한 번 더 하기 위해 계산 그래프를 남겨둠
+손실.backward(retain_graph=True)
+
+print(f"w=1.0, b=9.0에서 손실 {손실:.4f}")
+print(f"파이토치    w방향 {w.grad.item():.3f}  b방향 {b.grad.item():.3f}")
+
+h = 1e-4
+x64 = x_t.numpy().astype(np.float64)
+y64 = y_t.numpy().astype(np.float64)
+L = lambda wv, bv: np.mean((y64 - (wv * x64 + bv)) ** 2)
+print(
+    f"01 손계산   w 방향 {((L(1.0 + h, 9.0) - L(1.0 - h, 9.0)) / (2 * h)):.3f}   b방향 {((L(1.0, 9.0 + h) - L(1.0, 9.0 - h)) / (2 * h)):.3f}"
+)
+
+# 한 번 더 호출
+# PyTorch의 .grad는 자동으로 덮어쓰는 게 아니라 계속 누적되는 것을 눈으로 확인
+손실.backward()
+print(f"한 번 더 backward 하면 w 방향 {w.grad.item():.3f}   <- 두 배")
 
 
 # =====================================================================
@@ -111,9 +142,36 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 01 은 0.9840 x 공기온도 + 14.7799 였습니다. 끝자리 0.0001 차이는 float32 탓입니다.
 # 손으로 300줄, 사이킷런으로 3줄, 파이토치로 네 줄. 셋 다 같은 답에 도착했습니다.
 
+m = x_t.mean()
+s = x_t.std(unbiased=False)
+z_t = (x_t - m) / s
 
+Z = z_t.reshape(-1, 1)
+Y = y_t.reshape(-1, 1)
+torch.manual_seed(0)
 
+model = torch.nn.Linear(1, 1)  # w, b 를 가진 직선 한 층
+loss_fn = torch.nn.MSELoss()  # 손실 함수
+opt = torch.optim.SGD(model.parameters(), lr=0.1)  # 갱신 담당
 
+for epoch in range(300):
+    opt.zero_grad()  # 기울기 비우기
+    loss = loss_fn(model(Z), Y)  # 예측 → 손실
+    loss.backward()  # 기울기 자동계산
+    opt.step()  # 한 걸음
+    if epoch in (0, 10, 30, 100, 299):
+        print(f"epoch   {epoch}   손실 {loss.item():.4f}")
+
+# model.weight.item(), model.bias.item()
+# item() : 텐서 안에 숫자가 하나 있을 때 그 숫자를 일반 파이썬 숫자로 꺼내는 메서드
+w_z = model.weight.item()
+b_z = model.bias.item()
+
+# 모델은 표준화된 z를 학습한 상태
+# z가 아니라 원래 공기온도 x를 넣는 식이 필요
+print(
+    f"원래 눈금: 공정온도 = {(w_z / s.item()):.4f} X 공기온도 + {(b_z - w_z * m.item() / s.item()):.4f}"
+)
 
 
 # =====================================================================
@@ -146,9 +204,58 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 #
 # 03 에서 손으로 짠 것과 거의 같은 결론입니다. 임계값 손잡이도 그대로 살아 있습니다.
 
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
+Xc = df[특징이름].values
+yc = df["고장여부"].values
 
+Xc_tr, Xc_te, yc_tr, yc_te = train_test_split(
+    Xc, yc, test_size=0.3, random_state=3, stratify=yc
+)
 
+scaler = StandardScaler()
+
+# 테스트 데이터에 fit()을 적용하면 데이터의 기준(스케일)이 뒤틀려 모델이 데이터를 왜곡해서 해석
+# 데이터 누수(Data Leakage) 문제가 발생
+# 모든 전처리 기준을 오직 학습 데이터(Train)에만 고정
+# 머신러닝 모델의 : 학습 데이터로 공부 -> 처음 보는 데이터가 들어왔을 때 얼마나 잘 맞추는지 평가
+Xc_tr = scaler.fit_transform(Xc_tr)
+Xc_te = scaler.transform(Xc_te)
+
+Zc_tr = torch.tensor(Xc_tr, dtype=torch.float32)
+Zc_te = torch.tensor(Xc_te, dtype=torch.float32)
+Yc_tr = torch.tensor(yc_tr, dtype=torch.float32).reshape(-1, 1)
+
+torch.manual_seed(0)
+
+분류 = torch.nn.Linear(4, 1)
+분류손실 = torch.nn.BCEWithLogitsLoss()
+opt = torch.optim.SGD(분류.parameters(), lr=0.5)
+
+for epoch in range(2000):
+    opt.zero_grad()
+    loss = 분류손실(분류(Zc_tr), Yc_tr)
+    loss.backward()
+    opt.step()
+    if (epoch % 400) == 0:
+        print(f"epoch   {epoch}  손실 {loss.item():.4f}")
+
+with torch.no_grad():
+    확률 = torch.sigmoid(분류(Zc_te)).squeeze(1).numpy()
+
+from sklearn.metrics import recall_score, precision_score
+
+# 임계값 0.5 / 0.2 / 0.1 의 잡음·놓침·헛경보.
+#     임계값 0.5   잡음 1  놓침 1  헛경보 0
+#     임계값 0.2   잡음 1  놓침 1  헛경보 3
+#     임계값 0.1   잡음 2  놓침 0  헛경보 6
+for 기준 in (0.5, 0.2, 0.1):
+    판정 = (확률 >= 기준).astype(int)
+    잡음 = ((yc_te == 1) & (판정 == 1)).sum()  # TP : 실제 고장을 고장이라고 판단
+    놓침 = ((yc_te == 1) & (판정 == 0)).sum()  # FN : 실제 고장인데 정상이라고 판단
+    헛경보 = ((yc_te == 0) & (판정 == 1)).sum()  # FP : 실제 정상인데 고장이라고 판단
+    print(f"임계값 {기준}   잡음 {잡음}     놓침 {놓침}     헛경보 {헛경보}")
 
 
 # =====================================================================
@@ -173,10 +280,33 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # [B] 는 300 에폭 걸려 0.8921 에 닿았는데, 여기선 10 에폭 만에 0.90 근처에 왔습니다.
 #
 # ★ 생각할 것 ★ 그럼 배치를 1로 하면 제일 빠를까요? 왜 32 나 64 를 쓸까요?
-#   (답 →                                                               )
+#   (답 → 한 에폭당 가중치 업데이트 횟수가 너무 많아짐
+#         이 문제의 경우 배치 사이즈를 1로 하면 가중치 업데이트 횟수가 200회나 됨)
 
+from torch.utils.data import TensorDataset, DataLoader
 
+데이터셋 = TensorDataset(Z, Y)
 
+로더 = DataLoader(데이터셋, batch_size=32, shuffle=True)
+
+torch.manual_seed(0)
+
+배치모델 = torch.nn.Linear(1, 1)
+배치손실 = torch.nn.MSELoss()
+배치opt = torch.optim.SGD(배치모델.parameters(), lr=0.1)
+
+for epoch in range(30):
+    for xb, yb in 로더:
+        배치opt.zero_grad()
+        loss = 배치손실(배치모델(xb), yb)
+        loss.backward()
+        배치opt.step()
+    if epoch in (0, 9, 29):
+        with torch.no_grad():
+            전체손실 = 배치손실(배치모델(Z), Y)
+        print(f"epoch    {epoch}    전체 손실 {전체손실.item():.2f} 근처")
+
+print(f"한 에폭에 {len(로더)}번 걷습니다")
 
 
 # =====================================================================
@@ -185,20 +315,37 @@ df = pd.read_csv(os.path.join(DATA, "11_설비센서_ai4i.csv"), encoding="utf-8
 # 지금 실행하면 전부 [ ] 입니다. 위를 채워 갈수록 하나씩 [O] 로 바뀝니다.
 # 여기서 쓰는 이름: x_t, y_t, w, b, Z, Y, model, s, 분류, 분류손실, Zc_tr, Yc_tr, yc_te, 확률, 로더
 검사 = [
-    ("텐서", 'x_t.dtype == torch.float32 and len(x_t) == 200',
-     'torch.tensor(..., dtype=torch.float32) 로 만드세요'),
-    ("자동미분", 'min(abs(w.grad.item() / -580.548 - 1), abs(w.grad.item() / -580.548 - 2)) < 0.01',
-     'requires_grad=True 를 켜고 손실.backward() 를 부르세요. 01 과 같은 값(-580.548)이 나와야 합니다'),
-    ("모양", 'Y.shape == (200, 1) and Z.shape == (200, 1)',
-     'nn.Linear 는 (설비 수, 센서 수) 세로 표를 받습니다. reshape(-1, 1) 하세요'),
-    ("표준루프", 'abs(model.weight.item() / s.item() - 0.9840) < 0.002',
-     '원래 눈금으로 되돌린 기울기가 0.9840 근처여야 합니다. zero_grad→loss→backward→step 순서를 보세요'),
-    ("분류", '분류.weight.shape == (1, 4) and abs(분류손실(분류(Zc_tr), Yc_tr).item() - 0.1168) < 0.01',
-     'nn.Linear(4, 1) + BCEWithLogitsLoss, lr=0.5 로 2000 에폭입니다'),
-    ("임계값", 'int(((확률 >= 0.1) & (yc_te == 1)).sum()) == 2',
-     '임계값 0.1 이면 고장 2대를 다 잡아야 합니다'),
-    ("미니배치", 'len(로더) == 7',
-     'batch_size=32 면 200대가 7묶음이 됩니다'),
+    (
+        "텐서",
+        "x_t.dtype == torch.float32 and len(x_t) == 200",
+        "torch.tensor(..., dtype=torch.float32) 로 만드세요",
+    ),
+    (
+        "자동미분",
+        "min(abs(w.grad.item() / -580.548 - 1), abs(w.grad.item() / -580.548 - 2)) < 0.01",
+        "requires_grad=True 를 켜고 손실.backward() 를 부르세요. 01 과 같은 값(-580.548)이 나와야 합니다",
+    ),
+    (
+        "모양",
+        "Y.shape == (200, 1) and Z.shape == (200, 1)",
+        "nn.Linear 는 (설비 수, 센서 수) 세로 표를 받습니다. reshape(-1, 1) 하세요",
+    ),
+    (
+        "표준루프",
+        "abs(model.weight.item() / s.item() - 0.9840) < 0.002",
+        "원래 눈금으로 되돌린 기울기가 0.9840 근처여야 합니다. zero_grad→loss→backward→step 순서를 보세요",
+    ),
+    (
+        "분류",
+        "분류.weight.shape == (1, 4) and abs(분류손실(분류(Zc_tr), Yc_tr).item() - 0.1168) < 0.01",
+        "nn.Linear(4, 1) + BCEWithLogitsLoss, lr=0.5 로 2000 에폭입니다",
+    ),
+    (
+        "임계값",
+        "int(((확률 >= 0.1) & (yc_te == 1)).sum()) == 2",
+        "임계값 0.1 이면 고장 2대를 다 잡아야 합니다",
+    ),
+    ("미니배치", "len(로더) == 7", "batch_size=32 면 200대가 7묶음이 됩니다"),
 ]
 
 print()
@@ -220,4 +367,8 @@ for 이름, 검사식, 메시지 in 검사:
     남은것 += 0 if 통과 else 1
 
 print("=" * 60)
-print("    자체 점검 통과" if 남은것 == 0 else f"    {남은것}개 남았습니다. 위에서부터 하나씩 하세요")
+print(
+    "    자체 점검 통과"
+    if 남은것 == 0
+    else f"    {남은것}개 남았습니다. 위에서부터 하나씩 하세요"
+)
