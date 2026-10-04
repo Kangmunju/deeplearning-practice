@@ -65,9 +65,14 @@ y_broken = df["고장여부"].values
 print("1. 결정트리")
 
 # random_state=0으로 결정트리를 만드는 과정에서 필요한 랜덤 선택을 0번 패턴으로 고정
+# max_depth=2 : 내려가는 질문의 깊이를 최대 2단계까지만 허용(일부러 작은 트리로 제한)
+# class_weight="balanced" : 클래스가 불균형할 때 드문 클래스를 더 중요하게 보도록 가중치 줌
 tree = DecisionTreeClassifier(max_depth=2, class_weight="balanced", random_state=0)
 tree.fit(X, y_broken)
 print("[1] 학습된 트리를 글로 뽑기 (class 1 = 고장)")
+
+# 4개의 후보 특징을 X로 줌
+# 결정트리가 그중 고장/정상을 잘 구분할 수 있는 특징과 기준값을 학습해 질문으로 선택
 print(f"{export_text(tree, feature_names=feature_name)}")
 
 Xc_tr, Xc_te, yc_tr, yc_te = train_test_split(
@@ -81,6 +86,9 @@ rf_std = make_pipeline(
 print(f"[1-1] 트리는 표준화가 불요")
 print(f"표준화를 하지 않은 경우의 정확도 {rf_raw.score(Xc_te, yc_te):.4f}")
 print(f"표준화를 한 경우의 정확도 {rf_std.score(Xc_te, yc_te):.4f} <- 동일함")
+
+# 결정트리는 어떤 값보다 큰지 작은지를 기준으로 나누는 것
+# 표준화해서 값 자체가 달라지더라도 크기의 순서는 그대로
 
 # 1. 결정트리
 # [1] 학습된 트리를 글로 뽑기 (class 1 = 고장)
@@ -111,6 +119,9 @@ print("[2] 트리 깊이를 바꿔가며 (공정온도 예측)")
 for depth in [2, 3, 5, None]:
     t = DecisionTreeRegressor(max_depth=depth, random_state=0).fit(Xr_tr, yr_tr)
     name = "제한 없음" if depth is None else f"깊이 {depth}"
+
+    # DecisionTreeRegressor는 회귀 모델이기 때문에 score()가 R2(결정계수)를 반환
+    # score()는 회귀면 결정계수 반환, 분류면 정확도 반환
     print(
         f"{name} -> train {round(t.score(Xr_tr, yr_tr), 4)} / test {round(t.score(Xr_te, yr_te), 4)}"
     )
@@ -122,6 +133,10 @@ for depth in [2, 3, 5, None]:
 # 깊이 5 -> train 0.9241 / test 0.4187
 # 제한 없음 -> train 1.0 / test 0.3418
 
+# 트리를 깊게 만들수록 train 점수 증가 / test 점수(깊이 5부터) 감소
+# 깊이가 너무 깊어지면 학습 데이터의 규칙을 잘 찾는 수준을 넘어 지나치게 외움
+# 과접합 발생
+
 
 # =====================================================================
 # 3. 트리 하나가 위험하면 여러 개를 만들어 투표시킨다
@@ -130,6 +145,12 @@ print()
 print("\n3. 트리 하나가 위험하면 여러 개를 만들어 투표시킨다")
 
 print("[3] 한 그루 vs 숲 vs 부스팅 (공정온도 예측)")
+
+# for문이 리스트 안에 있는 값들을 하나씩 꺼내는 구조
+# 리스트 안에 값이 3개 들어있음
+# 각각의 값은 ("이름", 모델)처럼 2개짜리 한 쌍으로 이루어짐
+# 한 쌍을 꺼낼 때마다 첫 번째 것은 name, 두 번째 것은 model에 들어감
+# 3가지 모델을 각각 학습시키고 train/test 점수를 한 번에 출력하기 위함
 for name, model in [
     ("트리 한 그루(제한 없음)", DecisionTreeRegressor(random_state=0)),
     ("랜덤포레스트 200그루", RandomForestRegressor(n_estimators=200, random_state=0)),
@@ -157,9 +178,14 @@ print("\n4. 그래서 뭐가 더 좋은가")
 print("[4]")
 print("-" * 64)
 print("1판 - 공정온도 예측 (200행, 관계가 거의 직선)")
+
+# (이름, 모델)을 하나씩 꺼내서 학습시킨 후 train/test 성능 비교
 for name, model in [
     ("선형회귀", make_pipeline(StandardScaler(), LinearRegression())),
+    # 트리 계열(랜덤포레스트, 부스팅)은 표준화 불요
+    # 트리는 값의 크기 자체보다 어떤 기준보다 큰가/ 작은가로 데이터를 나누기 때문
     ("랜덤포레스트", RandomForestRegressor(n_estimators=200, random_state=0)),
+    # 부스팅 : 앞의 모델이 잘못 예측한 부분을 뒤의 모델이 계속 보완해 나가는 방식
     ("부스팅", HistGradientBoostingRegressor(random_state=0)),
 ]:
     m = model.fit(Xr_tr, yr_tr)
@@ -193,6 +219,9 @@ Xv_tr, Xv_te, vy_tr, vy_te = train_test_split(
 
 print("-" * 64)
 print(f"2판 - 압연 고진동 분류 (570행, 특징 {len(입력열)}개)")
+
+# (이름, 모델) 형태로 각 방식을 리스트에 넣고 한 번에 계산
+# 전부 분류 모델이지만 이번에는 재현율, 정밀도, F1을 각각 계산
 for name, model in [
     (
         "로지스틱 회귀",
@@ -229,6 +258,13 @@ forest = RandomForestClassifier(
     n_estimators=300, class_weight="balanced", random_state=0
 ).fit(Xv, y_고진동)
 print("[4-1] 랜덤포레스트가 꼽은 중요한 특징 5개")
+
+# forest.feature_importances_ : 랜덤 포레스트나 의사결정 나무같은 트리 기반 모델이 학습한 뒤
+#                               각 변수(특성)의 중요도를 숫자로 반환하는 속성
+# 모든 중요도의 합은 1(100%)이 되도록 정규화됨
+# 값이 1에 가까울수록 모델 예측에 크게 기여한 중요 변수
+# 특징이 여러개라면 중요도가 여러 특징에 분산될 수 있음
+# 따라서 feature_importances_를 상관계수처럼 보지 않을 것!
 for name, val in sorted(zip(입력열, forest.feature_importances_), key=lambda t: -t[1])[
     :5
 ]:
@@ -254,7 +290,13 @@ candidates = [
     ("부스팅", HistGradientBoostingRegressor(random_state=0)),
 ]
 print("[5] 후보를 교차검증으로 한꺼번에 (공정온도 예측, test는 손도 안 댐)")
+
+# test 데이터는 마지막 평가용으로 남김
+# 어떤 모델을 선택할지는 train 데이터 안에서 교차검증을 이용
 for name, model in candidates:
+    # cross_val_predict() : 교차 검증을 수행하면서 얻은 예측값 자체를 반환하는 함수
+    # cross_val_score()는 정확도나 오차 등의 점수를 반환
+    # cross_val_predict()는 전체 데이터셋에 대한 모델의 교차 검증 예측 결과 배열을 반환
     cv = cross_val_predict(model, Xr_tr, yr_tr, cv=5)
     print(f"{name}   CV 평균 {round(cv.mean(), 3)}  (조각별 {cv.round(2)})")
 
