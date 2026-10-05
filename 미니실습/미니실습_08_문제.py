@@ -36,21 +36,18 @@ V1, V2, c = 5.0, -2.0, 0.5
 # [A1] sigmoid 를 만드세요.   sigmoid(z) = 1 / (1 + e^(-z))
 #      힌트: e^(-z) 는 math.exp(-z)
 def sigmoid(z):
-    # TODO
-    pass
+    return 1 / (1 + math.exp(-z))
 
 
 # [A2] relu 를 만드세요.   relu(z) = max(0, z)  — 음수는 0, 양수는 그대로
 def relu(z):
-    # TODO
-    pass
+    return max(0.0, z)
 
 
 # [A3] 항등함수를 만드세요. 들어온 값을 그대로 내보내면 됩니다.
 #      ★ 이게 '활성화를 뺀' 경우입니다. 아무 일도 안 하는 활성화를 끼운 것과 같아요.
 def 항등(z):
-    # TODO
-    pass
+    return z
 
 
 # [A4] 순전파를 만드세요. 위 그림 그대로, 왼쪽에서 오른쪽으로 흐릅니다.
@@ -60,8 +57,12 @@ def 항등(z):
 #      ★ 중간값도 같이 돌려주세요. 아래에서 화면에 찍어 볼 겁니다.
 #        return y_hat, z1, z2, a1, a2
 def 순전파(x, 활성화):
-    # TODO
-    pass
+    z1 = W1 * x + b1
+    z2 = W2 * x + b2
+    a1 = 활성화(z1)
+    a2 = 활성화(z2)
+    y_hat = V1 * a1 + V2 * a2 + c
+    return y_hat, z1, z2, a1, a2
 
 
 # =====================================================================
@@ -99,9 +100,17 @@ print("[C] 활성화만 갈아 끼우며 — 온도 10 / 20 / 30")
 print("      온도    sigmoid      relu       활성화없음(항등)")
 표 = {}
 for 이름, g in [("sigmoid", sigmoid), ("relu", relu), ("항등", 항등)]:
-    표[이름] = None            # TODO
+    표[이름] = []
+    for x in [10, 20, 30]:
+        # 순전파는 y_hat 하나만이 아닌 y_hat, z1, z2, a1, a2 5개 전부 반환
+        # 따라서 [0]을 사용해 가장 첫번째에 위치한 y_hat만 뽑아내야 함
+        y_hat = 순전파(x, g)[0]
+        표[이름].append(y_hat)
 for i, x in enumerate((10, 20, 30)):
-    print(f"      {x:4d}   {표['sigmoid'][i]:9.4f}  {표['relu'][i]:9.4f}   {표['항등'][i]:9.4f}")
+    print(
+        f"      {x:4d}   {표['sigmoid'][i]:9.4f}  {표['relu'][i]:9.4f}   {표['항등'][i]:9.4f}"
+    )
+
 
 # 나와야 하는 것
 #        10     -0.8091    -5.5000    -15.5000
@@ -115,9 +124,13 @@ for i, x in enumerate((10, 20, 30)):
 # [D1] 각 활성화마다 (20의 ŷ - 10의 ŷ) 와 (30의 ŷ - 20의 ŷ) 를 출력하세요.
 print("=" * 60)
 print("[D] 옆 칸끼리의 차이 — 일정하면 직선이다")
-for 이름, 표시 in [("sigmoid", "sigmoid "), ("relu", "relu    "), ("항등", "항등     ")]:
+for 이름, 표시 in [
+    ("sigmoid", "sigmoid "),
+    ("relu", "relu    "),
+    ("항등", "항등     "),
+]:
     v = 표[이름]
-    print(f"    {표시} : ")     # TODO: v[1]-v[0] 과 v[2]-v[1] 을 +9.4f 로 찍으세요
+    print(f"    {표시} : {v[1] - v[0]:+9.4f}    {v[2] - v[1]:+9.4f}")
 
 # 나와야 하는 것
 #     sigmoid  :   +4.7131     +1.4888
