@@ -25,7 +25,7 @@ def sigmoid(z):
 
 # 온도가 높을수록 대체로 불량. 단 경계(26~34도)가 살짝 겹칩니다 — 현실 데이터가 원래 그래요
 온도 = np.array([18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40], dtype=float)
-불량 = np.array([ 0,  0,  0,  0,  1,  0,  1,  1,  0,  1,  1,  1], dtype=float)
+불량 = np.array([0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1], dtype=float)
 #                                 └ 28=양품, 34=양품 처럼 살짝 섞여 있습니다
 #
 #   불량?
@@ -43,8 +43,9 @@ def sigmoid(z):
 #        p = sigmoid(A @ V + c)      ← 여기가 회귀와 다른 점. p = '불량일 확률' 0~1
 #      return p, A
 def 순전파(X, W, b, V, c):
-    # TODO
-    pass
+    A = sigmoid(X @ W + b)
+    p = sigmoid(A @ V + c)
+    return p, A
 
 
 # [A2] ★ 변경 ② ★ 손실을 MSE 에서 BCE(로그손실)로 바꾸세요.
@@ -53,8 +54,7 @@ def 순전파(X, W, b, V, c):
 #        안 넣으면 nan 이 나옵니다. 실무 코드에 반드시 들어가는 한 줄입니다
 def BCE손실(p, Y):
     eps = 1e-9
-    # TODO
-    pass
+    return -np.mean(Y * np.log(p + eps) + (1 - Y) * np.log(1 - p + eps))
 
 
 # [A3] ★ 변경 ③ ★ 역전파 첫 줄만 바꾸세요. 나머지는 09 와 글자 하나 안 다릅니다.
@@ -71,8 +71,14 @@ def BCE손실(p, Y):
 #        우연이 아니라 설계된 궁합입니다. 그래서 이 둘을 짝지어 씁니다
 def 역전파(X, Y, A, p, V):
     n = len(X)
-    # TODO
-    pass
+    dlogit = (p - Y) / n
+    dV = A.T @ dlogit
+    dc = dlogit.sum(axis=0, keepdims=True)
+    dA = dlogit @ V.T
+    dZ = dA * A * (1 - A)
+    dW = X.T @ dZ
+    db = dZ.sum(axis=0, keepdims=True)
+    return dW, db, dV, dc
 
 
 def 표준화(x):
@@ -84,28 +90,35 @@ def 표준화(x):
 def fit(x, y, 은닉수=6, lr=1.0, epochs=2000, 로그=False):
     """09 의 fit 과 판박이입니다. 은닉수·lr·epochs 가 곧 오늘 돌려 볼 '손잡이'들입니다"""
     z, m, s = 표준화(x)
-    X = z.reshape(-1, 1); Y = y.reshape(-1, 1)
-    np.random.seed(0)                              # 시드 고정 → 재현성
+    X = z.reshape(-1, 1)
+    Y = y.reshape(-1, 1)
+    np.random.seed(0)  # 시드 고정 → 재현성
     W = np.random.randn(1, 은닉수) * 0.5
     b = np.zeros((1, 은닉수))
     V = np.random.randn(은닉수, 1) * 0.5
     c = np.zeros((1, 1))
     for epoch in range(epochs):
-        p, A = 순전파(X, W, b, V, c)                # ① 확률 예측
-        dW, db, dV, dc = 역전파(X, Y, A, p, V)      # ② 기울기 되짚기
-        W -= lr * dW; b -= lr * db                 # ③ 갱신
-        V -= lr * dV; c -= lr * dc
+        p, A = 순전파(X, W, b, V, c)  # ① 확률 예측
+        dW, db, dV, dc = 역전파(X, Y, A, p, V)  # ② 기울기 되짚기
+        W -= lr * dW
+        b -= lr * db  # ③ 갱신
+        V -= lr * dV
+        c -= lr * dc
         if 로그 and epoch % 500 == 0:
-            print(f"      epoch {epoch:5d}   BCE손실 {BCE손실(순전파(X,W,b,V,c)[0], Y):.4f}")
+            print(
+                f"      epoch {epoch:5d}   BCE손실 {BCE손실(순전파(X, W, b, V, c)[0], Y):.4f}"
+            )
     if 로그:
-        print(f"      epoch {epochs:5d}   BCE손실 {BCE손실(순전파(X,W,b,V,c)[0], Y):.4f}")
+        print(
+            f"      epoch {epochs:5d}   BCE손실 {BCE손실(순전파(X, W, b, V, c)[0], Y):.4f}"
+        )
     return (W, b, V, c, m, s)
 
 
 def 예측확률(x, 모델):
     """회귀의 predict 는 값을 바로 줬죠. 분류는 확률(0~1)을 돌려줍니다"""
     W, b, V, c, m, s = 모델
-    z = (np.asarray(x, dtype=float) - m) / s       # 학습 때와 같은 눈금으로 (04 의 원칙)
+    z = (np.asarray(x, dtype=float) - m) / s  # 학습 때와 같은 눈금으로 (04 의 원칙)
     return 순전파(z.reshape(-1, 1), W, b, V, c)[0].ravel()
 
 
@@ -131,10 +144,11 @@ print("[A] 분류로 학습 — BCE 가 내려가나")
 #
 # [A4] ★ 생각할 것 ★ 시작값 0.6873 에는 의미가 있습니다. -log(0.5) 를 계산해 보세요.
 #      학습 전 모델은 모든 샘플에 뭐라고 답하고 있었던 걸까요?
-#      (답 →                                                             )
+#      (답 → -log(0.5)는 시작값인 0.6873과 동일한 값
+#            학습 전에는 모든 샘플에 불량일 확률을 0.5라고 답하고 있었던 것)
 # [A5] ★ 생각할 것 ★ 손실이 0 까지는 안 내려가고 0.37 에서 멈췄습니다. 버그인가요?
 #      데이터의 26도와 28도를 다시 보세요.
-#      (답 →                                                             )
+#      (답 → 이 데이터는 경계가 겹쳐 있어서 원리적으로 0이 불가능)
 
 
 # =====================================================================
@@ -146,7 +160,9 @@ print("[B] 온도별 불량확률 · 판정 · 실제")
 판정 = 예측(온도, 모델)
 print("      온도   불량확률   판정   실제")
 for t, pr, pd, y in zip(온도, 확률, 판정, 불량):
-    print(f"      {int(t):3d}    {pr:.3f}      {pd}      {int(y)}   {'O' if pd==int(y) else 'X'}")
+    print(
+        f"      {int(t):3d}    {pr:.3f}      {pd}      {int(y)}   {'O' if pd == int(y) else 'X'}"
+    )
 
 
 # [B1] 혼동행렬 네 칸을 세세요. 03 에서 배운 그 네 칸이고 이름도 뜻도 완전히 같습니다.
@@ -158,8 +174,11 @@ for t, pr, pd, y in zip(온도, 확률, 판정, 불량):
 #      ★ FP 와 FN 을 바꿔 쓰면 재현율·정밀도가 뒤집힙니다. 뜻을 보고 쓰세요
 def 혼동행렬(y_true, y_pred):
     y_true = y_true.astype(int)
-    # TODO
-    pass
+    TP = int(np.sum((y_pred == 1) & (y_true == 1)))
+    TN = int(np.sum((y_pred == 0) & (y_true == 0)))
+    FP = int(np.sum((y_pred == 1) & (y_true == 0)))
+    FN = int(np.sum((y_pred == 0) & (y_true == 1)))
+    return TP, TN, FP, FN
 
 
 TP, TN, FP, FN = 혼동행렬(불량, 판정)
@@ -168,8 +187,8 @@ print(f"    정확도: {정확도(온도, 불량, 모델):.4f}")
 print("    혼동행렬            예측:양품   예측:불량")
 print(f"      실제 양품(0)         {TN:3d}        {FP:3d}")
 print(f"      실제 불량(1)         {FN:3d}        {TP:3d}")
-print(f"    재현율 = TP/(TP+FN) = {TP/(TP+FN):.3f}")
-print(f"    정밀도 = TP/(TP+FP) = {TP/(TP+FP):.3f}")
+print(f"    재현율 = TP/(TP+FN) = {TP / (TP + FN):.3f}")
+print(f"    정밀도 = TP/(TP+FP) = {TP / (TP + FP):.3f}")
 
 # 나와야 하는 것
 #       온도   불량확률   판정   실제
@@ -197,10 +216,11 @@ print(f"    정밀도 = TP/(TP+FP) = {TP/(TP+FP):.3f}")
 # '온도가 높으면 불량'이라는 경계를 제대로 배운 겁니다.
 #
 # [B2] ★ 생각할 것 ★ 틀린 세 줄(26·28·34)의 확률은 전부 몇 근처인가요? 모델이 뭐라고 말하는 중인가요?
-#      (답 →                                                             )
+#      (답 → 0.5 근처
+#            데이터가 겹쳐있으므로 완벽히 갈라낼 수 없음)
 # [B3] ★ 생각할 것 ★ 불량을 놓치는 걸(FN) 줄이고 싶으면 뭘 바꾸면 되나요?
 #      그러면 정밀도는 어떻게 되나요? (03 의 그 맞바꿈)
-#      (답 →                                                             )
+#      (답 → 결정 경계를 낮추면 재현율이 올라가고 정밀도가 낮아짐)
 #      ★ 해 볼 것: 예측(온도, 모델, 경계=0.4) 로 돌려 26도가 잡히는지 확인
 
 
@@ -213,8 +233,7 @@ print(f"    정밀도 = TP/(TP+FP) = {TP/(TP+FP):.3f}")
 # [C1] 손실계산을 채우세요. 학습에 쓴 12개 전체로 BCE 를 다시 재는 함수입니다.
 #      힌트: BCE손실(예측확률(온도, 모델).reshape(-1,1), 불량.reshape(-1,1))
 def 손실계산(모델):
-    # TODO
-    pass
+    return BCE손실(예측확률(온도, 모델).reshape(-1, 1), 불량.reshape(-1, 1))
 
 
 # [C2] lr 을 [0.01, 0.1, 1.0, 20.0, 80.0] 로, epochs 를 [50, 200, 1000, 5000] 로
@@ -224,14 +243,15 @@ print("[C] 손잡이 돌리기 — 학습에 쓴 12개로 다시 채점한 점�
 print("    (1) 학습률 lr        (은닉6·epochs2000 고정)")
 print("         lr      BCE손실   정확도")
 for lr in [0.01, 0.1, 1.0, 20.0, 80.0]:
-    # TODO
-    pass
+    m = fit(온도, 불량, 은닉수=6, lr=lr, epochs=2000)
+    print(f"      {lr:6}     {손실계산(m):.4f}    {정확도(온도, 불량, m):.3f}")
+
 print()
 print("    (2) epochs           (은닉6·lr1.0 고정)")
 print("      epochs    BCE손실   정확도")
 for e in [50, 200, 1000, 5000]:
-    # TODO
-    pass
+    m = fit(온도, 불량, 은닉수=6, lr=1.0, epochs=e)
+    print(f"      {e:4d}     {손실계산(m):.4f}    {정확도(온도, 불량, m):.3f}")
 
 # 나와야 하는 것
 #     (1) 학습률 lr        (은닉6·epochs2000 고정)
@@ -251,13 +271,16 @@ for e in [50, 200, 1000, 5000]:
 #
 # [C3] ★ 생각할 것 ★ lr=80 에서 손실이 6.1228 입니다. A4 에서 구한 '아무것도 안 배운 값'과
 #      비교해 보세요. 학습이 된 걸까요?
-#      (답 →                                                             )
+#      (답 → 학습이 제대로 되지 않았음
+#            학습률이 너무 커서 적절한 값을 지나치며 학습이 불안정해짐)
 # [C4] ★ 생각할 것 ★ lr=0.01 은 손실이 0.5085 로 나쁜데 정확도는 0.833 으로 좋습니다.
 #      lr=1.0 은 반대입니다. 왜 반대로 갈까요? 둘이 재는 게 뭐가 다른가요?
-#      (답 →                                                             )
+#      (답 → BCE 손실은 예측한 확률이 정답에 얼마나 가까운지를 평가
+#            정확도는 확률을 0.5 기준으로 0/1로 바꾼 뒤 맞았는지만 평가
+#            따라서 손실이 더 작다고 정확도가 반드시 더 높은 것은 아님)
 # [C5] ★ 여기서 멈추고 답을 적으세요 ★ 위 표만 보면 epochs 5000 (정확도 0.917)이 최고입니다.
 #      그럼 epochs 를 5만 번으로 하면 더 좋아질까요?
-#      (답 →                                                             )
+#      (답 → 늘리면 더 많은 학습을 할 수는 있으나 무조건 많이 학습한다고 좋은 것은 아님)
 #      ... 답을 적었으면 D 로 넘어가세요.
 
 
@@ -270,8 +293,8 @@ for e in [50, 200, 1000, 5000]:
 
 print("=" * 60)
 print("[D] 과적합 — train/test 로 정직하게 재면")
-np.random.seed(4)                                    # 시드 고정 → 매번 같은 분할
-섞은순서 = np.random.permutation(len(온도))            # ★ 문법 ★ permutation = 무작위로 섞은 순서
+np.random.seed(4)  # 시드 고정 → 매번 같은 분할
+섞은순서 = np.random.permutation(len(온도))  # ★ 문법 ★ permutation = 무작위로 섞은 순서
 train_idx, test_idx = 섞은순서[:8], 섞은순서[8:]
 온도_tr, 불량_tr = 온도[train_idx], 불량[train_idx]
 온도_te, 불량_te = 온도[test_idx], 불량[test_idx]
@@ -289,21 +312,28 @@ tr_m, tr_s = 온도_tr.mean(), 온도_tr.std()
 #        return 0.5 를 기준으로 판정한 것과 y 가 같은 비율
 def 정확도_고정눈금(x, y, 모델):
     W, b, V, c, _, _ = 모델
-    # TODO
-    pass
+    z = (x - tr_m) / tr_s
+    p, _ = 순전파(z.reshape(-1, 1), W, b, V, c)
+    return np.mean((p.ravel() >= 0.5).astype(int) == y.astype(int))
 
 
 def fit_고정눈금(x, y, 은닉수):
     """fit 과 같은데 표준화만 train 기준으로 고정했습니다 (lr=1.0, epochs=2000)"""
     z = (x - tr_m) / tr_s
-    X = z.reshape(-1, 1); Y = y.reshape(-1, 1)
+    X = z.reshape(-1, 1)
+    Y = y.reshape(-1, 1)
     np.random.seed(0)
-    W = np.random.randn(1, 은닉수) * 0.5; b = np.zeros((1, 은닉수))
-    V = np.random.randn(은닉수, 1) * 0.5; c = np.zeros((1, 1))
+    W = np.random.randn(1, 은닉수) * 0.5
+    b = np.zeros((1, 은닉수))
+    V = np.random.randn(은닉수, 1) * 0.5
+    c = np.zeros((1, 1))
     for _ in range(2000):
         p, A = 순전파(X, W, b, V, c)
         dW, db, dV, dc = 역전파(X, Y, A, p, V)
-        W -= 1.0*dW; b -= 1.0*db; V -= 1.0*dV; c -= 1.0*dc
+        W -= 1.0 * dW
+        b -= 1.0 * db
+        V -= 1.0 * dV
+        c -= 1.0 * dc
     return (W, b, V, c, tr_m, tr_s)
 
 
@@ -312,8 +342,11 @@ print()
 print("      은닉수   train정확도   test정확도")
 tr점수, te점수 = [], []
 for h in [1, 2, 4, 8, 32]:
-    # TODO: fit_고정눈금 으로 학습 → 두 정확도를 구해 tr점수/te점수 에 append → 출력
-    pass
+    m = fit_고정눈금(온도_tr, 불량_tr, h)
+    print(
+        f"      {h:4d}      {정확도_고정눈금(온도_tr, 불량_tr, m):.3f}"
+        f"        {정확도_고정눈금(온도_te, 불량_te, m):.3f}"
+    )
 
 # 나와야 하는 것
 #     train 온도: [24, 26, 30, 36, 34, 22, 40, 18]
@@ -340,11 +373,16 @@ for h in [1, 2, 4, 8, 32]:
 #
 # [D3] ★ 생각할 것 ★ C5 에 적은 답을 다시 보세요. 맞았나요?
 #      C 의 표가 '최종 설정을 고르는 근거'로 쓸 수 있는 표였나요?
-#      (답 →                                                             )
+#      (답 → C5의 답이 맞음
+#            학습을 더 많이 한다고 반드시 성능이 좋아지는 것은 아님
+#            표는 학습에 사용한 데이터로 다시 평가한 결과라 최종 설정을 고르는 근거로 사용할 수 없음)
 # [D4] ★ 생각할 것 ★ 이 데이터에서 '가장 좋은 은닉수'는 몇 개인가요? 무슨 근거로 고르나요?
-#      (답 →                                                             )
+#      (답 → 은닉수 1 또는 2가 가장 좋음
+#            train 정확도가 아니라 학습에 사용하지 않은 test 정확도를 기준으로 골랐고
+#            은닉수 1과 2의 test 정확도가 0.750으로 가장 높기 때문)
 # [D5] 한 문장으로 적으세요 — 오늘의 교훈입니다.
-#      (                                                                 )
+#      (학습 데이터의 성능만 보고 하이퍼파라미터를 고르면 과적합될 수 있으므로
+#       학습에 사용하지 않은 데이터의 성능을 기준으로 판단해야 함)
 #
 # ★ 정직한 단서 ★ test 가 4개뿐이라 한 점 맞고 틀림이 정확도를 0.25 씩 움직입니다.
 #   숫자 자체는 예시 수준이고, 핵심은 '뉴런↑ → train↑·test↓ 로 갈라진다'는 경향입니다.
@@ -358,19 +396,29 @@ for h in [1, 2, 4, 8, 32]:
 # =====================================================================
 X전체 = ((온도 - 온도.mean()) / 온도.std()).reshape(-1, 1)
 Y전체 = 불량.reshape(-1, 1)
-assert abs(BCE손실(np.full_like(Y전체, 0.5), Y전체) - 0.6931) < 1e-3, \
+assert abs(BCE손실(np.full_like(Y전체, 0.5), Y전체) - 0.6931) < 1e-3, (
     "전부 0.5 로 찍으면 BCE 가 -log(0.5)=0.693 이어야 합니다"
+)
 p0, A0 = 순전파(X전체, *모델[:4])
-assert np.all((p0 >= 0) & (p0 <= 1)), "확률이 0~1 을 벗어났습니다 — 출력 sigmoid 를 빼먹은 것"
+assert np.all((p0 >= 0) & (p0 <= 1)), (
+    "확률이 0~1 을 벗어났습니다 — 출력 sigmoid 를 빼먹은 것"
+)
 h = 1e-6
 W2, b2, V2, c2 = (m.copy() for m in 모델[:4])
 dW, db, dV, dc = 역전파(X전체, Y전체, A0, p0, V2)
-c앞, c뒤 = c2.copy(), c2.copy(); c앞[0, 0] += h; c뒤[0, 0] -= h
-수치 = (BCE손실(순전파(X전체, W2, b2, V2, c앞)[0], Y전체)
-        - BCE손실(순전파(X전체, W2, b2, V2, c뒤)[0], Y전체)) / (2 * h)
-assert abs(dc[0, 0] - 수치) < 1e-5, "역전파 출력 오차가 (p-y)/n 이 아닙니다 (09 의 2(ŷ-y) 를 그대로 쓴 것)"
+c앞, c뒤 = c2.copy(), c2.copy()
+c앞[0, 0] += h
+c뒤[0, 0] -= h
+수치 = (
+    BCE손실(순전파(X전체, W2, b2, V2, c앞)[0], Y전체)
+    - BCE손실(순전파(X전체, W2, b2, V2, c뒤)[0], Y전체)
+) / (2 * h)
+assert abs(dc[0, 0] - 수치) < 1e-5, (
+    "역전파 출력 오차가 (p-y)/n 이 아닙니다 (09 의 2(ŷ-y) 를 그대로 쓴 것)"
+)
 assert TP + TN + FP + FN == len(온도), "혼동행렬 네 칸의 합이 샘플 수와 같아야 합니다"
-assert tr점수[-1] >= tr점수[0] and te점수[-1] < te점수[0], \
+assert tr점수[-1] >= tr점수[0] and te점수[-1] < te점수[0], (
     "뉴런을 늘릴 때 train 은 오르고 test 는 내려가야 합니다 (과적합)"
+)
 print()
 print("자체 점검 통과")
